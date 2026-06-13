@@ -45,7 +45,22 @@ HALLUCINATIONS = frozenset({
 
 # Set SPEAKR_SILENT=1 to suppress transcribed text in terminal (screen-share privacy)
 SILENT = os.getenv("SPEAKR_SILENT", "0") == "1"
+# Set SPEAKR_SOUND=0 to disable click sounds
+SOUND  = os.getenv("SPEAKR_SOUND",  "1") == "1"
 # ──────────────────────────────────────────────────────────────────────────────
+
+
+def _play(name: str) -> None:
+    """Play a macOS system sound in a background thread (non-blocking)."""
+    if not SOUND:
+        return
+    threading.Thread(
+        target=lambda: subprocess.run(
+            ["afplay", f"/System/Library/Sounds/{name}.aiff"],
+            capture_output=True,
+        ),
+        daemon=True,
+    ).start()
 
 
 def _sanitize_app_name(name: str) -> str:
@@ -507,6 +522,7 @@ class Speakr:
                 self._target_app = r.stdout.strip()
             except Exception:
                 self._target_app = ""
+            _play("Tink")
             self.rec.start()
             self.bus.show_rec.emit()
 
@@ -537,6 +553,7 @@ class Speakr:
             self.bus.show_text.emit(text)
             time.sleep(0.8)           # brief preview in overlay
             _paste(text, self._target_app)
+            _play("Pop")
             time.sleep(0.25)
         except Exception as exc:
             if not SILENT:

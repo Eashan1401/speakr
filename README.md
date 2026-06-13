@@ -93,6 +93,14 @@ Swap models with `SPEAKR_MODEL=small python speakr.py`:
 SPEAKR_POLISH=0 python speakr.py
 ```
 
+## Disable sounds
+
+Speakr plays a click when you start recording and a pop when text is pasted. To turn off:
+
+```bash
+SPEAKR_SOUND=0 python speakr.py
+```
+
 ## Screen sharing / privacy mode
 
 Hides all transcribed text from the terminal (text still pastes normally):
