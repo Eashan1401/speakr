@@ -159,13 +159,19 @@ class Polisher:
             return text
 
 
-def _paste(text: str) -> None:
-    """Clipboard swap + Cmd-V into the focused app; restores clipboard after."""
+def _paste(text: str, target_app: str = "") -> None:
+    """Re-focus target app, clipboard swap, Cmd-V, restore clipboard."""
     try:
         saved = pyperclip.paste()
     except Exception:
         saved = ""
     pyperclip.copy(text)
+    if target_app:
+        subprocess.run(
+            ["osascript", "-e", f'tell application "{target_app}" to activate'],
+            capture_output=True, timeout=3,
+        )
+        time.sleep(0.15)
     subprocess.run(
         ["osascript", "-e",
          'tell application "System Events" to keystroke "v" using command down'],
@@ -383,7 +389,8 @@ class Speakr:
         self.polisher = Polisher()      # starts grammar engine in background
         self.tx       = Transcriber()   # blocks until Whisper model loads (parallel)
 
-        self._recording = False
+        self._recording   = False
+        self._target_app  = ""
 
         # Cross-thread signal wiring (auto queued — thread-safe)
         self.bus.show_rec.connect(lambda: self.ui.set_state(Overlay.REC))
@@ -437,6 +444,15 @@ class Speakr:
     def _kp(self, key) -> None:
         if key == HOTKEY and not self._recording:
             self._recording = True
+            try:
+                r = subprocess.run(
+                    ["osascript", "-e",
+                     "tell application \"System Events\" to get name of first process whose frontmost is true"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                self._target_app = r.stdout.strip()
+            except Exception:
+                self._target_app = ""
             self.rec.start()
             self.bus.show_rec.emit()
 
@@ -465,7 +481,7 @@ class Speakr:
         # Show text in overlay briefly, then paste
         self.bus.show_text.emit(text)
         time.sleep(1.1)
-        _paste(text)
+        _paste(text, self._target_app)
         time.sleep(0.4)
         self.bus.do_hide.emit()
 
