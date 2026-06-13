@@ -115,43 +115,37 @@ class Transcriber:
 
 
 class Polisher:
-    """Optional grammar + English correction via Claude Haiku.
+    """Grammar + English correction using LanguageTool (100% local, zero cost).
 
     Enabled with: SPEAKR_POLISH=1 python speakr.py
-    Requires ANTHROPIC_API_KEY in environment.
+    Requires Java:  brew install --cask temurin
     """
 
     def __init__(self) -> None:
-        self._client = None
+        self._tool = None
         if os.getenv("SPEAKR_POLISH") != "1":
             return
         try:
-            import anthropic
-            self._client = anthropic.Anthropic()
-            print("✓  Polish mode on — grammar correction active.\n")
-        except ImportError:
-            print("⚠  SPEAKR_POLISH=1 but 'anthropic' not installed.")
-            print("   Run: pip install anthropic\n")
+            import language_tool_python
+            print("  Starting LanguageTool (local, first run downloads ~200 MB)…",
+                  end=" ", flush=True)
+            self._tool = language_tool_python.LanguageTool("en-US")
+            print("ready.")
+            print("✓  Polish mode on — grammar correction active (100% free, local).\n")
+        except language_tool_python.utils.LanguageToolError:
+            print("\n⚠  Polish mode needs Java. Install it once (free):")
+            print("   brew install --cask temurin")
+            print("   Then restart Speakr.\n")
         except Exception as e:
-            print(f"⚠  Polish mode disabled: {e}\n")
+            print(f"\n⚠  Polish mode unavailable: {e}\n")
 
     def polish(self, text: str) -> str:
-        if not self._client or not text:
+        if not self._tool or not text:
             return text
         try:
-            msg = self._client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=200,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        "Fix grammar, word choice, and sentence structure in this "
-                        "spoken text. Keep the meaning and tone exactly the same. "
-                        "Return ONLY the corrected text with no explanation:\n\n" + text
-                    ),
-                }],
-            )
-            return msg.content[0].text.strip()
+            import language_tool_python
+            matches = self._tool.check(text)
+            return language_tool_python.utils.correct(text, matches)
         except Exception:
             return text
 
