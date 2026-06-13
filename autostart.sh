@@ -51,9 +51,17 @@ enable() {
 </dict>
 </plist>
 EOF
-  # Reload cleanly (modern launchctl, fall back to legacy)
+  # Stop any existing instance, then wait — bootout is async and bootstrapping
+  # before it fully releases the domain causes "Input/output error" (errno 5).
+  pkill -f "speakr.py" 2>/dev/null || true
   launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
-  launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST"
+  sleep 2
+  if ! launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null; then
+    # Already loaded or transient error — wait longer and retry once
+    launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
+    sleep 3
+    launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null || true
+  fi
   launchctl kickstart -k "gui/$UID_NUM/$LABEL" 2>/dev/null || true
   echo "  ✓ Auto-launch enabled — Speakr is running now and starts at every login."
   echo ""
