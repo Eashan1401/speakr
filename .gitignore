@@ -1,8 +1,23 @@
+# Virtual environment
 .venv/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-.DS_Store
 *.egg-info/
 dist/
 build/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Audio / temp files — never commit recorded audio
+*.wav
+*.mp3
+*.m4a
+speakr_*.wav
+
+# Logs
+*.log

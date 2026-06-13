@@ -42,7 +42,15 @@ HALLUCINATIONS = frozenset({
     "thanks", "thanks.", "bye", "bye.", "okay", "okay.", "ok", "ok.",
     "so", "so.", "and", "and.", "huh", "huh.",
 })
+
+# Set SPEAKR_SILENT=1 to suppress transcribed text in terminal (screen-share privacy)
+SILENT = os.getenv("SPEAKR_SILENT", "0") == "1"
 # ──────────────────────────────────────────────────────────────────────────────
+
+
+def _sanitize_app_name(name: str) -> str:
+    """Remove chars that could break an AppleScript string literal."""
+    return name.replace('"', "").replace("\\", "").replace("\n", "").replace("\r", "")[:64]
 
 
 class AudioRecorder:
@@ -101,20 +109,26 @@ class Transcriber:
     def run(self, audio: np.ndarray) -> str:
         rms = float(np.sqrt(np.mean(audio ** 2)))
         dur = len(audio) / SAMPLE_RATE
-        print(f"   [{dur:.1f}s  rms={rms:.4f}]", flush=True)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            sf.write(f.name, audio, SAMPLE_RATE)
-            path = f.name
+        if not SILENT:
+            print(f"   [{dur:.1f}s  rms={rms:.4f}]", flush=True)
+        # Write to a restricted temp dir; always delete even on error
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix="speakr_")
         try:
+            os.close(fd)
+            sf.write(path, audio, SAMPLE_RATE)
             segs, _ = self.model.transcribe(
                 path, beam_size=5, language="en",
                 initial_prompt="Clear, well-spoken English.",
             )
             raw = " ".join(s.text for s in segs).strip()
         finally:
-            os.unlink(path)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         if raw.lower().rstrip(".,!?") in HALLUCINATIONS:
-            print(f"   [filtered: {raw!r}]", flush=True)
+            if not SILENT:
+                print(f"   [filtered: {raw!r}]", flush=True)
             return ""
         return raw
 
@@ -167,8 +181,9 @@ def _paste(text: str, target_app: str = "") -> None:
         saved = ""
     pyperclip.copy(text)
     if target_app:
+        safe = _sanitize_app_name(target_app)
         subprocess.run(
-            ["osascript", "-e", f'tell application "{target_app}" to activate'],
+            ["osascript", "-e", f'tell application "{safe}" to activate'],
             capture_output=True, timeout=3,
         )
         time.sleep(0.15)
@@ -500,12 +515,14 @@ class Speakr:
     def _worker(self, audio: np.ndarray) -> None:
         text = self.tx.run(audio)
         if not text:
-            print("→  (nothing detected — speak while holding ⌥)", flush=True)
+            if not SILENT:
+                print("→  (nothing detected — speak while holding ⌥)", flush=True)
             self.bus.do_hide.emit()
             return
 
         text = self.polisher.polish(text)
-        print(f"→  {text}", flush=True)
+        if not SILENT:
+            print(f"→  {text}", flush=True)
 
         # Show text in overlay briefly, then paste
         self.bus.show_text.emit(text)
