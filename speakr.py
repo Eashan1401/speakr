@@ -134,23 +134,24 @@ class Transcriber:
         self.model = WhisperModel(MODEL, device="cpu", compute_type="int8")
         print("ready.  Hold ⌥ Right to dictate.\n")
 
-    def run(self, audio: np.ndarray) -> str:
+    def run(self, audio: np.ndarray) -> tuple[str, str]:
+        """Return (transcribed_text, detected_language_code)."""
         rms = float(np.sqrt(np.mean(audio ** 2)))
         dur = len(audio) / SAMPLE_RATE
         if not SILENT:
             print(f"   [{dur:.1f}s  rms={rms:.4f}]", flush=True)
-        # Write to a restricted temp dir; always delete even on error
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="speakr_")
         try:
             os.close(fd)
             sf.write(path, audio, SAMPLE_RATE)
             lang = None if LANG == "auto" else LANG
-            segs, _ = self.model.transcribe(
+            segs, info = self.model.transcribe(
                 path, beam_size=3, language=lang,
                 vad_filter=True,
                 condition_on_previous_text=False,
             )
             raw = " ".join(s.text for s in segs).strip()
+            detected = info.language or LANG
         finally:
             try:
                 os.unlink(path)
@@ -159,60 +160,89 @@ class Transcriber:
         if raw.lower().rstrip(".,!?") in HALLUCINATIONS:
             if not SILENT:
                 print(f"   [filtered: {raw!r}]", flush=True)
-            return ""
-        return raw
+            return "", detected
+        return raw, detected
+
+
+_LT_LANG = {"en": "en-US", "de": "de-DE", "es": "es", "fr": "fr",
+            "it": "it", "nl": "nl", "pt": "pt-BR"}
 
 
 class Polisher:
-    """Grammar + English correction using LanguageTool (100% local, zero cost).
+    """Grammar correction via LanguageTool — works in all language modes.
 
-    Loads in a background thread so it doesn't delay Whisper startup.
+    Caches one LanguageTool instance per language. In auto-detect mode,
+    the detected language from Whisper is used to pick the right rules.
+    First occurrence of a new language starts a background LT instance;
+    the original text is returned immediately while it warms up.
     Disable with: SPEAKR_POLISH=0 python speakr.py
     """
 
     def __init__(self) -> None:
-        self._tool  = None
+        self._tools : dict[str, object] = {}   # lt_lang → LanguageTool | None
+        self._loading: set[str]         = set()
+        self._lock  = threading.Lock()
         self._ready = threading.Event()
 
-        # Auto-detect mode can't know which grammar rules to apply — skip polish
-        if os.getenv("SPEAKR_POLISH", "1") == "0" or LANG == "auto":
-            if LANG == "auto":
-                print("  Grammar correction disabled in auto-detect mode.")
+        if os.getenv("SPEAKR_POLISH", "1") == "0":
             self._ready.set()
             return
 
-        threading.Thread(target=self._load, daemon=True).start()
+        # Pre-warm with the configured language (or English for auto mode)
+        warmup = LANG if LANG != "auto" else "en"
+        threading.Thread(target=self._load, args=(warmup,), daemon=True).start()
 
-    def _load(self) -> None:
+    def _lt_code(self, lang: str) -> str:
+        return _LT_LANG.get(lang, lang)   # unknown codes passed through as-is
+
+    def _load(self, lang: str) -> None:
+        lt = self._lt_code(lang)
         try:
             import language_tool_python
-            lt_lang = {"en": "en-US", "de": "de-DE", "es": "es", "fr": "fr",
-                       "it": "it", "nl": "nl", "pt": "pt-BR"}.get(LANG, "en-US")
-            print(f"  Starting grammar engine ({lt_lang})…", end=" ", flush=True)
-            self._tool = language_tool_python.LanguageTool(lt_lang)
+            print(f"  Starting grammar engine ({lt})…", end=" ", flush=True)
+            tool = language_tool_python.LanguageTool(lt)
             print("ready.")
+            with self._lock:
+                self._tools[lt] = tool
         except Exception as e:
-            print(f"\n⚠  Grammar engine unavailable: {e}")
+            print(f"\n⚠  Grammar engine unavailable for {lt}: {e}")
+            with self._lock:
+                self._tools[lt] = None
         finally:
+            self._loading.discard(lang)
             self._ready.set()
 
-    def polish(self, text: str) -> str:
+    def _get(self, lang: str) -> object | None:
+        lt = self._lt_code(lang)
+        with self._lock:
+            if lt in self._tools:
+                return self._tools[lt]
+            if lang not in self._loading:
+                self._loading.add(lang)
+                threading.Thread(target=self._load, args=(lang,), daemon=True).start()
+        return None   # not ready yet — caller returns original text
+
+    def polish(self, text: str, lang: str = "en") -> str:
         self._ready.wait(timeout=30)
-        if not self._tool or not text:
+        if not text:
+            return text
+        tool = self._get(lang)
+        if not tool:
             return text
         try:
             import language_tool_python
-            matches = self._tool.check(text)
+            matches = tool.check(text)
             return language_tool_python.utils.correct(text, matches)
         except Exception:
-            # Server may have died — attempt one silent restart
             try:
                 import language_tool_python
-                self._tool = language_tool_python.LanguageTool("en-US")
-                matches = self._tool.check(text)
-                return language_tool_python.utils.correct(text, matches)
+                new = language_tool_python.LanguageTool(self._lt_code(lang))
+                with self._lock:
+                    self._tools[self._lt_code(lang)] = new
+                return language_tool_python.utils.correct(text, new.check(text))
             except Exception:
-                self._tool = None
+                with self._lock:
+                    self._tools[self._lt_code(lang)] = None
                 return text
 
 
@@ -556,13 +586,13 @@ class Speakr:
 
     def _worker(self, audio: np.ndarray) -> None:
         try:
-            text = self.tx.run(audio)
+            text, detected_lang = self.tx.run(audio)
             if not text:
                 if not SILENT:
                     print("→  (nothing detected — speak while holding ⌥)", flush=True)
                 return
 
-            text = self.polisher.polish(text)
+            text = self.polisher.polish(text, detected_lang)
             if not SILENT:
                 print(f"→  {text}", flush=True)
 
