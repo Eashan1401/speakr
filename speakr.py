@@ -32,6 +32,11 @@ HOTKEY       = kb.Key.alt_r                          # Hold Right Option (⌥)
 MIN_SEC      = 0.25                                   # ignore accidental taps
 BAR_COUNT    = 22
 
+# Bake Homebrew Java path so LanguageTool always finds it
+_java = "/opt/homebrew/opt/openjdk/bin"
+if _java not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _java + ":" + os.environ.get("PATH", "")
+
 HALLUCINATIONS = frozenset({
     "", ".", "..", "...", "you", "you.", "thank you", "thank you.",
     "thanks", "thanks.", "bye", "bye.", "okay", "okay.", "ok", "ok.",
@@ -117,29 +122,33 @@ class Transcriber:
 class Polisher:
     """Grammar + English correction using LanguageTool (100% local, zero cost).
 
-    Enabled with: SPEAKR_POLISH=1 python speakr.py
-    Requires Java:  brew install --cask temurin
+    Loads in a background thread so it doesn't delay Whisper startup.
+    Disable with: SPEAKR_POLISH=0 python speakr.py
     """
 
     def __init__(self) -> None:
-        self._tool = None
-        if os.getenv("SPEAKR_POLISH") != "1":
+        self._tool  = None
+        self._ready = threading.Event()
+
+        if os.getenv("SPEAKR_POLISH", "1") == "0":
+            self._ready.set()
             return
+
+        threading.Thread(target=self._load, daemon=True).start()
+
+    def _load(self) -> None:
         try:
             import language_tool_python
-            print("  Starting LanguageTool (local, first run downloads ~200 MB)…",
-                  end=" ", flush=True)
+            print("  Starting grammar engine…", end=" ", flush=True)
             self._tool = language_tool_python.LanguageTool("en-US")
             print("ready.")
-            print("✓  Polish mode on — grammar correction active (100% free, local).\n")
-        except language_tool_python.utils.LanguageToolError:
-            print("\n⚠  Polish mode needs Java. Install it once (free):")
-            print("   brew install --cask temurin")
-            print("   Then restart Speakr.\n")
         except Exception as e:
-            print(f"\n⚠  Polish mode unavailable: {e}\n")
+            print(f"\n⚠  Grammar engine unavailable: {e}")
+        finally:
+            self._ready.set()
 
     def polish(self, text: str) -> str:
+        self._ready.wait(timeout=30)
         if not self._tool or not text:
             return text
         try:
@@ -371,8 +380,8 @@ class Speakr:
         self.bus      = _Bus()
         self.ui       = Overlay()
         self.rec      = AudioRecorder()
-        self.tx       = Transcriber()   # blocks until Whisper model loads
-        self.polisher = Polisher()
+        self.polisher = Polisher()      # starts grammar engine in background
+        self.tx       = Transcriber()   # blocks until Whisper model loads (parallel)
 
         self._recording = False
 
