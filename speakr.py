@@ -316,6 +316,25 @@ class Speakr:
         kbl.start()
         self._kbl = kbl
 
+        self._check_accessibility()
+
+    # ── Accessibility check ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _check_accessibility() -> None:
+        import subprocess
+        r = subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to get name of first process whose frontmost is true'],
+            capture_output=True, timeout=3,
+        )
+        if r.returncode != 0:
+            print("\n⚠️  Hotkey won't work until you grant Accessibility permission:")
+            print("   System Settings → Privacy & Security → Accessibility")
+            print("   Click + and add your terminal app (Terminal, iTerm2, Warp…)\n")
+        else:
+            print("✓  Accessibility OK — hotkey active.\n")
+
     # ── Hotkey callbacks (pynput thread) ───────────────────────────────────────
 
     def _kp(self, key) -> None:
