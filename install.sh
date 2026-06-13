@@ -46,6 +46,52 @@ pip install -q --upgrade pip
 pip install -q -r "$SPEAKR_DIR/requirements.txt"
 echo "  ✓ Dependencies installed."
 
+# ── Language selection ────────────────────────────────────────────────────────
+echo ""
+echo "  ─── Language ─────────────────────────────────────────────────────────"
+echo ""
+echo "  What language do you speak? Speakr will transcribe and correct grammar"
+echo "  in that language. You can change this any time in .speakr.conf"
+echo ""
+echo "    1) Auto-detect  (switches per recording — works for any language)"
+echo "    2) English"
+echo "    3) German   / Deutsch"
+echo "    4) Spanish  / Español"
+echo "    5) French   / Français"
+echo "    6) Italian  / Italiano"
+echo "    7) Portuguese / Português"
+echo "    8) Dutch    / Nederlands"
+echo "    9) Other    (I'll set the code manually)"
+echo ""
+read -rp "  Choice [1]: " lang_choice
+lang_choice="${lang_choice:-1}"
+
+case "$lang_choice" in
+  1) SPEAKR_LANG="auto" ;;
+  2) SPEAKR_LANG="en"   ;;
+  3) SPEAKR_LANG="de"   ;;
+  4) SPEAKR_LANG="es"   ;;
+  5) SPEAKR_LANG="fr"   ;;
+  6) SPEAKR_LANG="it"   ;;
+  7) SPEAKR_LANG="pt"   ;;
+  8) SPEAKR_LANG="nl"   ;;
+  9)
+    echo ""
+    read -rp "  Enter language code (e.g. ja, zh, ko, ru, ar): " SPEAKR_LANG
+    SPEAKR_LANG="${SPEAKR_LANG:-auto}"
+    ;;
+  *) SPEAKR_LANG="auto" ;;
+esac
+
+# Write config — env vars always override this file if set manually
+cat > "$SPEAKR_DIR/.speakr.conf" <<EOF
+# Speakr config — edit any time, or re-run install.sh to reconfigure
+# Language codes: en de es fr it pt nl auto (or any Whisper language code)
+SPEAKR_LANG=$SPEAKR_LANG
+EOF
+
+echo "  ✓ Language set to '$SPEAKR_LANG' (saved to .speakr.conf)"
+
 # ── Shell alias ───────────────────────────────────────────────────────────────
 ALIAS_LINE="alias speakr='cd $SPEAKR_DIR && source .venv/bin/activate && python speakr.py'"
 SHELL_RC="$HOME/.zshrc"
@@ -74,8 +120,8 @@ echo ""
 echo "  Run Speakr:"
 echo "    speakr"
 echo ""
-echo "  Or directly:"
-echo "    cd $SPEAKR_DIR && source .venv/bin/activate && python speakr.py"
+echo "  Change language any time: edit $SPEAKR_DIR/.speakr.conf"
+echo "  Or re-run: ./install.sh"
 echo ""
 echo "  Hold Right Option (⌥) anywhere to record. Release to paste."
 echo ""

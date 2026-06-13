@@ -21,3 +21,6 @@ speakr_*.wav
 
 # Logs
 *.log
+
+# Personal config (language preference etc — set by install.sh, stays local)
+.speakr.conf

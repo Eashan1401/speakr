@@ -33,6 +33,16 @@ HOTKEY       = kb.Key.alt_r                          # Hold Right Option (⌥)
 MIN_SEC      = 0.25                                   # ignore accidental taps
 BAR_COUNT    = 22
 
+# Load .speakr.conf if present (env vars still override)
+_conf = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".speakr.conf")
+if os.path.exists(_conf):
+    with open(_conf) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 # Bake Homebrew Java path so LanguageTool always finds it
 _java = "/opt/homebrew/opt/openjdk/bin"
 if _java not in os.environ.get("PATH", ""):
@@ -164,7 +174,10 @@ class Polisher:
         self._tool  = None
         self._ready = threading.Event()
 
-        if os.getenv("SPEAKR_POLISH", "1") == "0":
+        # Auto-detect mode can't know which grammar rules to apply — skip polish
+        if os.getenv("SPEAKR_POLISH", "1") == "0" or LANG == "auto":
+            if LANG == "auto":
+                print("  Grammar correction disabled in auto-detect mode.")
             self._ready.set()
             return
 
