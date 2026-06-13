@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 # ── Config ─────────────────────────────────────────────────────────────────────
 SAMPLE_RATE  = 16_000
 MODEL        = os.getenv("SPEAKR_MODEL", "base")   # tiny|base|small|medium|large-v3
+LANG         = os.getenv("SPEAKR_LANG",  "en")      # en|de|es|fr|it|nl|pt|auto…
 HOTKEY       = kb.Key.alt_r                          # Hold Right Option (⌥)
 MIN_SEC      = 0.25                                   # ignore accidental taps
 BAR_COUNT    = 22
@@ -133,9 +134,9 @@ class Transcriber:
         try:
             os.close(fd)
             sf.write(path, audio, SAMPLE_RATE)
+            lang = None if LANG == "auto" else LANG
             segs, _ = self.model.transcribe(
-                path, beam_size=3, language="en",
-                initial_prompt="Clear, well-spoken English.",
+                path, beam_size=3, language=lang,
                 vad_filter=True,
                 condition_on_previous_text=False,
             )
@@ -172,8 +173,10 @@ class Polisher:
     def _load(self) -> None:
         try:
             import language_tool_python
-            print("  Starting grammar engine…", end=" ", flush=True)
-            self._tool = language_tool_python.LanguageTool("en-US")
+            lt_lang = {"en": "en-US", "de": "de-DE", "es": "es", "fr": "fr",
+                       "it": "it", "nl": "nl", "pt": "pt-BR"}.get(LANG, "en-US")
+            print(f"  Starting grammar engine ({lt_lang})…", end=" ", flush=True)
+            self._tool = language_tool_python.LanguageTool(lt_lang)
             print("ready.")
         except Exception as e:
             print(f"\n⚠  Grammar engine unavailable: {e}")

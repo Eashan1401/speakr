@@ -87,6 +87,19 @@ Swap models with `SPEAKR_MODEL=small python speakr.py`:
 
 ---
 
+## Change language
+
+Speakr defaults to English. Pass any [Whisper language code](https://github.com/openai/whisper#available-models-and-languages):
+
+```bash
+SPEAKR_LANG=de python speakr.py   # German
+SPEAKR_LANG=es python speakr.py   # Spanish
+SPEAKR_LANG=fr python speakr.py   # French
+SPEAKR_LANG=auto python speakr.py # auto-detect (slightly slower)
+```
+
+Grammar correction also switches language automatically.
+
 ## Disable grammar correction
 
 ```bash
