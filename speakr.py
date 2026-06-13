@@ -145,8 +145,11 @@ class Transcriber:
             os.close(fd)
             sf.write(path, audio, SAMPLE_RATE)
             lang = None if LANG == "auto" else LANG
+            # auto mode needs higher beam_size — Whisper has to detect language
+            # AND transcribe accurately with no prior hint
+            beam = 5 if LANG == "auto" else 3
             segs, info = self.model.transcribe(
-                path, beam_size=3, language=lang,
+                path, beam_size=beam, language=lang,
                 vad_filter=True,
                 condition_on_previous_text=False,
             )
