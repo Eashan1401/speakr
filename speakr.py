@@ -21,7 +21,7 @@ from faster_whisper import WhisperModel
 from pynput import keyboard as kb
 from PyQt6.QtCore import Qt, QTimer, QObject, pyqtSignal
 from PyQt6.QtGui import (
-    QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,
+    QBrush, QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap,
 )
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
@@ -93,6 +93,8 @@ class AudioRecorder:
             self._stream = None
         with self._lock:
             chunks = list(self._chunks)
+            self._chunks.clear()   # free memory immediately
+            self._levels.clear()
         audio = (np.concatenate(chunks).flatten()
                  if chunks else np.zeros(SAMPLE_RATE, dtype="float32"))
         return audio, len(audio) / SAMPLE_RATE
@@ -117,8 +119,10 @@ class Transcriber:
             os.close(fd)
             sf.write(path, audio, SAMPLE_RATE)
             segs, _ = self.model.transcribe(
-                path, beam_size=5, language="en",
+                path, beam_size=3, language="en",
                 initial_prompt="Clear, well-spoken English.",
+                vad_filter=True,
+                condition_on_previous_text=False,
             )
             raw = " ".join(s.text for s in segs).strip()
         finally:
@@ -170,7 +174,15 @@ class Polisher:
             matches = self._tool.check(text)
             return language_tool_python.utils.correct(text, matches)
         except Exception:
-            return text
+            # Server may have died — attempt one silent restart
+            try:
+                import language_tool_python
+                self._tool = language_tool_python.LanguageTool("en-US")
+                matches = self._tool.check(text)
+                return language_tool_python.utils.correct(text, matches)
+            except Exception:
+                self._tool = None
+                return text
 
 
 def _paste(text: str, target_app: str = "") -> None:
@@ -353,7 +365,6 @@ class Overlay(QWidget):
 
 
     def _paint_text(self, p: QPainter) -> None:
-        from PyQt6.QtGui import QFont, QFontMetrics
         W, H = self.width(), self.height()
         α = self._text_alpha
 
@@ -470,7 +481,6 @@ class Speakr:
 
     @staticmethod
     def _check_accessibility() -> None:
-        import subprocess
         r = subprocess.run(
             ["osascript", "-e",
              'tell application "System Events" to get name of first process whose frontmost is true'],
@@ -513,23 +523,26 @@ class Speakr:
     # ── Worker thread (transcription + paste) ──────────────────────────────────
 
     def _worker(self, audio: np.ndarray) -> None:
-        text = self.tx.run(audio)
-        if not text:
+        try:
+            text = self.tx.run(audio)
+            if not text:
+                if not SILENT:
+                    print("→  (nothing detected — speak while holding ⌥)", flush=True)
+                return
+
+            text = self.polisher.polish(text)
             if not SILENT:
-                print("→  (nothing detected — speak while holding ⌥)", flush=True)
-            self.bus.do_hide.emit()
-            return
+                print(f"→  {text}", flush=True)
 
-        text = self.polisher.polish(text)
-        if not SILENT:
-            print(f"→  {text}", flush=True)
-
-        # Show text in overlay briefly, then paste
-        self.bus.show_text.emit(text)
-        time.sleep(1.1)
-        _paste(text, self._target_app)
-        time.sleep(0.4)
-        self.bus.do_hide.emit()
+            self.bus.show_text.emit(text)
+            time.sleep(0.8)           # brief preview in overlay
+            _paste(text, self._target_app)
+            time.sleep(0.25)
+        except Exception as exc:
+            if not SILENT:
+                print(f"⚠  {exc}", flush=True)
+        finally:
+            self.bus.do_hide.emit()   # always hide, even on crash
 
     # ── Main-thread helpers ────────────────────────────────────────────────────
 

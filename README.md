@@ -93,6 +93,14 @@ Swap models with `SPEAKR_MODEL=small python speakr.py`:
 SPEAKR_POLISH=0 python speakr.py
 ```
 
+## Screen sharing / privacy mode
+
+Hides all transcribed text from the terminal (text still pastes normally):
+
+```bash
+SPEAKR_SILENT=1 python speakr.py
+```
+
 ---
 
 ## Requirements
