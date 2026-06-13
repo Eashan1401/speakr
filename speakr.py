@@ -94,15 +94,21 @@ class Transcriber:
         print("ready.  Hold ⌥ Right to dictate.\n")
 
     def run(self, audio: np.ndarray) -> str:
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        dur = len(audio) / SAMPLE_RATE
+        print(f"   [{dur:.1f}s  rms={rms:.4f}]", flush=True)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             sf.write(f.name, audio, SAMPLE_RATE)
             path = f.name
         try:
             segs, _ = self.model.transcribe(path, beam_size=5)
-            text = " ".join(s.text for s in segs).strip()
+            raw = " ".join(s.text for s in segs).strip()
         finally:
             os.unlink(path)
-        return "" if text.lower().rstrip(".,!?") in HALLUCINATIONS else text
+        if raw.lower().rstrip(".,!?") in HALLUCINATIONS:
+            print(f"   [filtered: {raw!r}]", flush=True)
+            return ""
+        return raw
 
 
 def _paste(text: str) -> None:
@@ -358,10 +364,10 @@ class Speakr:
     def _worker(self, audio: np.ndarray) -> None:
         text = self.tx.run(audio)
         if text:
-            print(f"→  {text}")
+            print(f"→  {text}", flush=True)
             _paste(text)
         else:
-            print("→  (nothing detected)")
+            print("→  (nothing detected — speak while holding ⌥)", flush=True)
         self.bus.do_hide.emit()
 
     # ── Main-thread helpers ────────────────────────────────────────────────────
