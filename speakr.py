@@ -101,7 +101,10 @@ class Transcriber:
             sf.write(f.name, audio, SAMPLE_RATE)
             path = f.name
         try:
-            segs, _ = self.model.transcribe(path, beam_size=5)
+            segs, _ = self.model.transcribe(
+                path, beam_size=5, language="en",
+                initial_prompt="Clear, well-spoken English.",
+            )
             raw = " ".join(s.text for s in segs).strip()
         finally:
             os.unlink(path)
@@ -109,6 +112,48 @@ class Transcriber:
             print(f"   [filtered: {raw!r}]", flush=True)
             return ""
         return raw
+
+
+class Polisher:
+    """Optional grammar + English correction via Claude Haiku.
+
+    Enabled with: SPEAKR_POLISH=1 python speakr.py
+    Requires ANTHROPIC_API_KEY in environment.
+    """
+
+    def __init__(self) -> None:
+        self._client = None
+        if os.getenv("SPEAKR_POLISH") != "1":
+            return
+        try:
+            import anthropic
+            self._client = anthropic.Anthropic()
+            print("✓  Polish mode on — grammar correction active.\n")
+        except ImportError:
+            print("⚠  SPEAKR_POLISH=1 but 'anthropic' not installed.")
+            print("   Run: pip install anthropic\n")
+        except Exception as e:
+            print(f"⚠  Polish mode disabled: {e}\n")
+
+    def polish(self, text: str) -> str:
+        if not self._client or not text:
+            return text
+        try:
+            msg = self._client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        "Fix grammar, word choice, and sentence structure in this "
+                        "spoken text. Keep the meaning and tone exactly the same. "
+                        "Return ONLY the corrected text with no explanation:\n\n" + text
+                    ),
+                }],
+            )
+            return msg.content[0].text.strip()
+        except Exception:
+            return text
 
 
 def _paste(text: str) -> None:
@@ -132,9 +177,10 @@ def _paste(text: str) -> None:
 
 class _Bus(QObject):
     """Qt signals for crossing the pynput-thread → main-thread boundary."""
-    show_rec = pyqtSignal()
-    show_tx  = pyqtSignal()
-    do_hide  = pyqtSignal()
+    show_rec  = pyqtSignal()
+    show_tx   = pyqtSignal()
+    show_text = pyqtSignal(str)   # final text to display briefly before paste
+    do_hide   = pyqtSignal()
 
 
 class Overlay(QWidget):
@@ -144,8 +190,9 @@ class Overlay(QWidget):
     TX state:  three bouncing dots while transcribing.
     """
 
-    REC = "rec"
-    TX  = "tx"
+    REC  = "rec"
+    TX   = "tx"
+    TEXT = "text"
 
     def __init__(self) -> None:
         super().__init__()
@@ -157,16 +204,18 @@ class Overlay(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.resize(264, 68)
+        self.resize(320, 68)
 
-        self._state  = ""
-        self._bars   = [0.2] * BAR_COUNT   # target bar heights (from audio)
-        self._smooth = [0.2] * BAR_COUNT   # exponentially smoothed for painting
-        self._frame  = 0
+        self._state        = ""
+        self._bars         = [0.2] * BAR_COUNT
+        self._smooth       = [0.2] * BAR_COUNT
+        self._frame        = 0
+        self._display_text = ""
+        self._text_alpha   = 0      # 0-255, fades in then out
 
         timer = QTimer(self)
         timer.timeout.connect(self._tick)
-        timer.start(50)                    # 20 fps
+        timer.start(50)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -175,6 +224,19 @@ class Overlay(QWidget):
         if bars:
             self._bars = bars
         if state and not self.isVisible():
+            self._reposition()
+            self.show()
+
+    def set_text(self, text: str) -> None:
+        self._state        = self.TEXT
+        self._text_alpha   = 0
+        # Truncate to ~38 chars; keep word boundaries
+        if len(text) > 38:
+            cut = text[:36].rsplit(" ", 1)[0]
+            self._display_text = cut + " …"
+        else:
+            self._display_text = text
+        if not self.isVisible():
             self._reposition()
             self.show()
 
@@ -196,6 +258,8 @@ class Overlay(QWidget):
         if self._state:
             for i in range(BAR_COUNT):
                 self._smooth[i] += (self._bars[i] - self._smooth[i]) * 0.30
+            if self._state == self.TEXT:
+                self._text_alpha = min(255, self._text_alpha + 25)   # fade in
             self.update()
 
     # ── Paint ──────────────────────────────────────────────────────────────────
@@ -214,8 +278,10 @@ class Overlay(QWidget):
 
         if self._state == self.REC:
             self._paint_waveform(p)
-        else:
+        elif self._state == self.TX:
             self._paint_dots(p)
+        else:
+            self._paint_text(p)
 
     def _paint_waveform(self, p: QPainter) -> None:
         W, H  = self.width(), self.height()
@@ -262,6 +328,26 @@ class Overlay(QWidget):
             )
 
 
+    def _paint_text(self, p: QPainter) -> None:
+        from PyQt6.QtGui import QFont, QFontMetrics
+        W, H = self.width(), self.height()
+        α = self._text_alpha
+
+        # Small checkmark dot on the left (green, like Wispr Flow's "done" state)
+        p.setBrush(QBrush(QColor(52, 199, 89, α)))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(18, H // 2 - 5, 10, 10)
+
+        # Transcribed text
+        font = QFont(".AppleSystemUIFont", 14)
+        font.setWeight(QFont.Weight.Medium)
+        p.setFont(font)
+        p.setPen(QColor(255, 255, 255, α))
+        rect = self.rect().adjusted(38, 0, -14, 0)
+        p.drawText(rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                   self._display_text)
+
+
 def _tray_icon() -> QIcon:
     """White mic silhouette for the macOS menu bar."""
     px = QPixmap(22, 22)
@@ -288,16 +374,18 @@ class Speakr:
         self.qt = QApplication(sys.argv)
         self.qt.setQuitOnLastWindowClosed(False)
 
-        self.bus = _Bus()
-        self.ui  = Overlay()
-        self.rec = AudioRecorder()
-        self.tx  = Transcriber()        # blocks until Whisper model loads
+        self.bus      = _Bus()
+        self.ui       = Overlay()
+        self.rec      = AudioRecorder()
+        self.tx       = Transcriber()   # blocks until Whisper model loads
+        self.polisher = Polisher()
 
         self._recording = False
 
         # Cross-thread signal wiring (auto queued — thread-safe)
         self.bus.show_rec.connect(lambda: self.ui.set_state(Overlay.REC))
         self.bus.show_tx.connect(lambda:  self.ui.set_state(Overlay.TX))
+        self.bus.show_text.connect(self.ui.set_text)
         self.bus.do_hide.connect(self.ui.hide_overlay)
 
         # Timer: push fresh bar heights while recording (main thread)
@@ -363,11 +451,19 @@ class Speakr:
 
     def _worker(self, audio: np.ndarray) -> None:
         text = self.tx.run(audio)
-        if text:
-            print(f"→  {text}", flush=True)
-            _paste(text)
-        else:
+        if not text:
             print("→  (nothing detected — speak while holding ⌥)", flush=True)
+            self.bus.do_hide.emit()
+            return
+
+        text = self.polisher.polish(text)
+        print(f"→  {text}", flush=True)
+
+        # Show text in overlay briefly, then paste
+        self.bus.show_text.emit(text)
+        time.sleep(1.1)
+        _paste(text)
+        time.sleep(0.4)
         self.bus.do_hide.emit()
 
     # ── Main-thread helpers ────────────────────────────────────────────────────
