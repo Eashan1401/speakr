@@ -545,17 +545,26 @@ class Speakr:
 
     @staticmethod
     def _check_accessibility() -> None:
-        r = subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to get name of first process whose frontmost is true'],
-            capture_output=True, timeout=3,
-        )
-        if r.returncode != 0:
-            print("\n⚠️  Hotkey won't work until you grant Accessibility permission:")
-            print("   System Settings → Privacy & Security → Accessibility")
-            print("   Click + and add your terminal app (Terminal, iTerm2, Warp…)\n")
-        else:
+        # Informational only — must never crash startup (e.g. under launchd
+        # this osascript can hang or be blocked before TCC is granted).
+        ok = False
+        try:
+            r = subprocess.run(
+                ["osascript", "-e",
+                 'tell application "System Events" to get name of first process whose frontmost is true'],
+                capture_output=True, timeout=3,
+            )
+            ok = r.returncode == 0
+        except Exception:
+            ok = False
+        if ok:
             print("✓  Accessibility OK — hotkey active.\n")
+        else:
+            print("\n⚠️  If the hotkey doesn't work, grant Accessibility permission:")
+            print("   System Settings → Privacy & Security → Accessibility → +")
+            print("   • If you launched from a terminal, add that terminal app.")
+            print("   • If Speakr auto-started at login, add this exact binary:")
+            print(f"       {sys.executable}\n")
 
     # ── Hotkey callbacks (pynput thread) ───────────────────────────────────────
 

@@ -87,6 +87,20 @@ Swap models with `SPEAKR_MODEL=small python speakr.py`:
 
 ---
 
+## Auto-launch at login
+
+Have Speakr start silently every time you boot — the mic icon just appears, no command needed.
+
+```bash
+./autostart.sh enable    # start now + at every login
+./autostart.sh disable   # turn off
+./autostart.sh status    # check state
+```
+
+`install.sh` offers to set this up for you.
+
+**One note:** when launched at login, macOS needs Accessibility permission on the Python binary (not your terminal). If the hotkey doesn't work after a reboot, the app prints the exact path to add — drop it into System Settings → Privacy & Security → Accessibility once and it persists.
+
 ## Change language
 
 Speakr defaults to English. Pass any [Whisper language code](https://github.com/openai/whisper#available-models-and-languages):

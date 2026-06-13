@@ -106,6 +106,21 @@ else
   echo "  ✓ 'speakr' alias already in $SHELL_RC."
 fi
 
+# ── Auto-launch at login ──────────────────────────────────────────────────────
+echo ""
+echo "  ─── Auto-launch ──────────────────────────────────────────────────────"
+echo ""
+echo "  Start Speakr automatically at login? The mic icon just appears in your"
+echo "  menu bar every time you boot — no need to run a command."
+echo ""
+read -rp "  Enable auto-launch? [Y/n]: " autostart_choice
+autostart_choice="${autostart_choice:-Y}"
+if [[ "$autostart_choice" =~ ^[Yy] ]]; then
+  bash "$SPEAKR_DIR/autostart.sh" enable
+else
+  echo "  Skipped. Enable any time with: ./autostart.sh enable"
+fi
+
 # ── One-time permission instructions ─────────────────────────────────────────
 echo ""
 echo "  ─── One-time macOS permission (required) ─────────────────────────────"
