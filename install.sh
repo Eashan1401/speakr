@@ -1,57 +1,81 @@
 #!/bin/bash
 set -euo pipefail
 
+SPEAKR_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo ""
 echo "  Speakr — free local voice dictation for macOS"
 echo "  ───────────────────────────────────────────────"
 echo ""
 
-if ! command -v python3 &>/dev/null; then
-  echo "Error: python3 not found. Install via https://www.python.org or: brew install python"
+# ── Homebrew ──────────────────────────────────────────────────────────────────
+if ! command -v brew &>/dev/null; then
+  echo "  Homebrew not found. Install it from https://brew.sh, then re-run this script."
   exit 1
+fi
+echo "  ✓ Homebrew found."
+
+# ── Java (LanguageTool needs it for grammar correction) ───────────────────────
+if [ ! -d "/opt/homebrew/opt/openjdk" ] && ! command -v java &>/dev/null; then
+  echo "  Installing Java (needed for grammar correction, one-time ~200 MB)…"
+  brew install openjdk
+fi
+echo "  ✓ Java found."
+
+# Add Java to PATH for this session
+export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
+
+# ── Python ────────────────────────────────────────────────────────────────────
+if ! command -v python3 &>/dev/null; then
+  echo "  Python 3 not found. Installing…"
+  brew install python
 fi
 
 PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-echo "  Python $PY_VER found."
+echo "  ✓ Python $PY_VER found."
 
-if [ ! -d ".venv" ]; then
+# ── Virtual environment ───────────────────────────────────────────────────────
+if [ ! -d "$SPEAKR_DIR/.venv" ]; then
   echo "  Creating virtual environment…"
-  python3 -m venv .venv
+  python3 -m venv "$SPEAKR_DIR/.venv"
 fi
 
-source .venv/bin/activate
-echo "  Installing dependencies (first run downloads ~74MB Whisper model on launch)…"
+source "$SPEAKR_DIR/.venv/bin/activate"
+echo "  Installing Python dependencies…"
 pip install -q --upgrade pip
-pip install -q -r requirements.txt
+pip install -q -r "$SPEAKR_DIR/requirements.txt"
+echo "  ✓ Dependencies installed."
 
+# ── Shell alias ───────────────────────────────────────────────────────────────
+ALIAS_LINE="alias speakr='cd $SPEAKR_DIR && source .venv/bin/activate && python speakr.py'"
+SHELL_RC="$HOME/.zshrc"
+[ -n "${BASH_VERSION:-}" ] && SHELL_RC="$HOME/.bashrc"
+
+if ! grep -q "alias speakr=" "$SHELL_RC" 2>/dev/null; then
+  echo "" >> "$SHELL_RC"
+  echo "# speakr: free local voice dictation" >> "$SHELL_RC"
+  echo "$ALIAS_LINE" >> "$SHELL_RC"
+  echo "  ✓ Added 'speakr' command to $SHELL_RC (restart terminal or run: source $SHELL_RC)"
+else
+  echo "  ✓ 'speakr' alias already in $SHELL_RC."
+fi
+
+# ── One-time permission instructions ─────────────────────────────────────────
 echo ""
-echo "  ✓ Installation complete!"
+echo "  ─── One-time macOS permission (required) ─────────────────────────────"
 echo ""
-echo "  ─── Required permissions (one-time setup) ────────────────────────────"
+echo "  System Settings → Privacy & Security → Accessibility"
+echo "  Click + and add your terminal app (Terminal, iTerm2, Warp, etc.)"
 echo ""
-echo "  1. Accessibility (for global hotkeys):"
-echo "     System Settings → Privacy & Security → Accessibility"
-echo "     Click '+' and add your terminal app (Terminal.app, iTerm2, Warp, etc.)"
+echo "  Microphone: macOS will prompt automatically on first run."
 echo ""
-echo "  2. Microphone: macOS will prompt automatically on first run."
+echo "  ─── Done! ────────────────────────────────────────────────────────────"
 echo ""
-echo "  ─── Run ──────────────────────────────────────────────────────────────"
+echo "  Run Speakr:"
+echo "    speakr"
 echo ""
-echo "  source .venv/bin/activate && python speakr.py"
+echo "  Or directly:"
+echo "    cd $SPEAKR_DIR && source .venv/bin/activate && python speakr.py"
 echo ""
-echo "  Add a shell alias (optional):"
-echo "  echo \"alias speakr='cd $(pwd) && source .venv/bin/activate && python speakr.py'\" >> ~/.zshrc"
-echo ""
-echo "  ─── Usage ────────────────────────────────────────────────────────────"
-echo ""
-echo "  Hold Right Option (⌥) to record. Release to transcribe and paste."
-echo ""
-echo "  Model sizes (via SPEAKR_MODEL env var):"
-echo "    tiny     ~39 MB   fastest, lower accuracy"
-echo "    base     ~74 MB   default — good balance"
-echo "    small   ~244 MB   better accuracy"
-echo "    medium  ~769 MB   great accuracy"
-echo "    large-v3  1.5 GB  best accuracy"
-echo ""
-echo "  Example: SPEAKR_MODEL=small python speakr.py"
+echo "  Hold Right Option (⌥) anywhere to record. Release to paste."
 echo ""

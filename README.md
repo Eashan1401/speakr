@@ -1,71 +1,113 @@
 # Speakr
 
-Free, local voice dictation for macOS. Works in any app, any text field.
-Powered by [OpenAI Whisper](https://github.com/openai/whisper) running fully on your device — no subscriptions, no API keys, nothing leaving your machine.
+Free, local voice dictation for macOS. Works in any app — VS Code, Chrome, Notes, Slack, anywhere.
 
-## What it does
+No subscription. No API key. No data leaves your machine. Ever.
 
-Hold **Right Option (⌥)** anywhere. Speak. Release. Text appears at your cursor.
+Powered by [OpenAI Whisper](https://github.com/openai/whisper) running fully on your device.
 
-- Live waveform animation while recording
-- Bouncing dots while transcribing
-- Automatically pastes into whatever app is focused
-- Works in any text field: messages, emails, code editors, notes, browsers
+---
+
+## How it works
+
+1. Hold **Right Option (⌥)** anywhere while you type
+2. Speak
+3. Release — text is corrected and pasted instantly
+
+The mic icon in your menu bar turns **red** while recording so you always know it's listening.
+
+---
 
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/speakr.git
+git clone https://github.com/Eashan1401/speakr.git
 cd speakr
-./install.sh
+chmod +x install.sh && ./install.sh
 ```
 
-Then grant **Accessibility** permission to your terminal (System Settings → Privacy & Security → Accessibility → add your terminal app). Required once.
+That's it. The script handles Python deps, Java (for grammar correction), and adds a `speakr` command to your shell.
+
+**One permission required (one-time):**
+System Settings → Privacy & Security → Accessibility → add your terminal app
+
+---
 
 ## Run
 
 ```bash
-source .venv/bin/activate && python speakr.py
+speakr
 ```
 
-The first launch downloads the Whisper model (~74MB for the default `base` model). After that, it's instant.
-
-Add a shell alias so you can start it from anywhere:
+Or if you haven't restarted your terminal yet:
 
 ```bash
-echo "alias speakr='cd /path/to/speakr && source .venv/bin/activate && python speakr.py'" >> ~/.zshrc
+cd speakr && source .venv/bin/activate && python speakr.py
 ```
+
+---
+
+## Features
+
+- **Works everywhere** — any text field in any app
+- **Grammar correction** — spoken English is automatically cleaned up before pasting ("i dont know what you is talking" → "I don't know what you are talking about")
+- **Live waveform** — animated overlay shows recording is active
+- **Menu bar indicator** — mic icon turns red while recording, fades when done
+- **100% local** — Whisper runs on your CPU, grammar engine runs on your machine, nothing is sent anywhere
+- **Zero ongoing cost** — no API, no subscription, no tokens
+
+---
+
+## Privacy
+
+Everything runs on your device:
+
+| Component | Where it runs |
+|-----------|--------------|
+| Speech recognition | Local (faster-whisper, CPU) |
+| Grammar correction | Local (LanguageTool Java server) |
+| Text paste | Local (macOS AppleScript) |
+| Network calls | None |
+
+Your audio and text never leave your Mac.
+
+---
 
 ## Model sizes
 
-| Model | Size | Speed | Accuracy |
-|-------|------|-------|----------|
-| `tiny` | 39 MB | fastest | lower |
-| `base` | 74 MB | fast | good ← default |
-| `small` | 244 MB | moderate | better |
-| `medium` | 769 MB | slower | great |
-| `large-v3` | 1.5 GB | slow | best |
+Swap models with `SPEAKR_MODEL=small python speakr.py`:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| `tiny` | 39 MB | Fastest, lower accuracy |
+| `base` | 74 MB | Default — good balance |
+| `small` | 244 MB | Better accuracy |
+| `medium` | 769 MB | Great accuracy |
+| `large-v3` | 1.5 GB | Best accuracy |
+
+---
+
+## Disable grammar correction
 
 ```bash
-SPEAKR_MODEL=small python speakr.py
+SPEAKR_POLISH=0 python speakr.py
 ```
+
+---
 
 ## Requirements
 
 - macOS 13+ (Ventura or later)
 - Python 3.10+
-- ~500MB disk space (model + deps)
+- Homebrew (for Java install)
+- ~500 MB disk (model + deps + grammar engine)
 
-## Sharing with friends
+---
 
-Push to GitHub. They clone and run `./install.sh`. That's it.
+## Built with
 
-## How it works
-
-1. `pynput` listens globally for Right Option keydown
-2. `sounddevice` streams mic audio at 16kHz
-3. On keyup, audio is written to a temp WAV and passed to `faster-whisper`
-4. Transcribed text is set as clipboard contents, then `osascript` simulates Cmd+V
-5. Clipboard is restored to its previous contents
-
-All processing is local. No network calls during transcription.
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — speech recognition
+- [language-tool-python](https://github.com/jxmorris12/language_tool_python) — grammar correction
+- [PyQt6](https://pypi.org/project/PyQt6/) — overlay UI
+- [pynput](https://github.com/moses-palmer/pynput) — global hotkeys
+- [sounddevice](https://python-sounddevice.readthedocs.io/) — mic capture

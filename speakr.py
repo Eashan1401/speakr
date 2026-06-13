@@ -357,23 +357,35 @@ class Overlay(QWidget):
                    self._display_text)
 
 
-def _tray_icon() -> QIcon:
-    """White mic silhouette for the macOS menu bar."""
+def _draw_mic(color: QColor, dot: QColor | None = None) -> QIcon:
+    """Mic silhouette in `color`; optional red recording dot top-right."""
     px = QPixmap(22, 22)
     px.fill(QColor(0, 0, 0, 0))
     p = QPainter(px)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setBrush(QBrush(QColor(255, 255, 255, 210)))
+    p.setBrush(QBrush(color))
     p.setPen(Qt.PenStyle.NoPen)
-    p.drawRoundedRect(8, 2, 6, 9, 3, 3)           # capsule
-    pen = QPen(QColor(255, 255, 255, 180), 1.8)
+    p.drawRoundedRect(8, 2, 6, 9, 3, 3)
+    pen = QPen(color, 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     p.setPen(pen)
-    p.drawArc(5, 7, 12, 9, 0, -180 * 16)          # arc
-    p.drawLine(11, 16, 11, 20)                     # stand
-    p.drawLine(8, 20, 14, 20)                      # base
+    p.drawArc(5, 7, 12, 9, 0, -180 * 16)
+    p.drawLine(11, 16, 11, 20)
+    p.drawLine(8, 20, 14, 20)
+    if dot:
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(dot))
+        p.drawEllipse(15, 0, 7, 7)
     p.end()
     return QIcon(px)
+
+
+def _tray_icon(state: str = "idle") -> QIcon:
+    if state == "rec":
+        return _draw_mic(QColor(255, 55, 45, 230), dot=QColor(255, 55, 45))
+    if state == "tx":
+        return _draw_mic(QColor(180, 180, 180, 180))
+    return _draw_mic(QColor(255, 255, 255, 210))
 
 
 class Speakr:
@@ -393,10 +405,10 @@ class Speakr:
         self._target_app  = ""
 
         # Cross-thread signal wiring (auto queued — thread-safe)
-        self.bus.show_rec.connect(lambda: self.ui.set_state(Overlay.REC))
-        self.bus.show_tx.connect(lambda:  self.ui.set_state(Overlay.TX))
+        self.bus.show_rec.connect(self._on_rec)
+        self.bus.show_tx.connect(self._on_tx)
         self.bus.show_text.connect(self.ui.set_text)
-        self.bus.do_hide.connect(self.ui.hide_overlay)
+        self.bus.do_hide.connect(self._on_hide)
 
         # Timer: push fresh bar heights while recording (main thread)
         wt = QTimer()
@@ -405,7 +417,7 @@ class Speakr:
         self._wt = wt
 
         # System tray
-        tray = QSystemTrayIcon(_tray_icon(), self.qt)
+        tray = QSystemTrayIcon(_tray_icon("idle"), self.qt)
         m = QMenu()
         m.addAction("Speakr  —  Hold ⌥ Right to dictate")
         m.addSeparator()
@@ -421,6 +433,23 @@ class Speakr:
         self._kbl = kbl
 
         self._check_accessibility()
+
+    # ── Tray state helpers (main thread) ──────────────────────────────────────
+
+    def _on_rec(self) -> None:
+        self._tray.setIcon(_tray_icon("rec"))
+        self._tray.setToolTip("Speakr — recording…")
+        self.ui.set_state(Overlay.REC)
+
+    def _on_tx(self) -> None:
+        self._tray.setIcon(_tray_icon("tx"))
+        self._tray.setToolTip("Speakr — transcribing…")
+        self.ui.set_state(Overlay.TX)
+
+    def _on_hide(self) -> None:
+        self._tray.setIcon(_tray_icon("idle"))
+        self._tray.setToolTip("Speakr — Hold ⌥ Right to dictate")
+        self.ui.hide_overlay()
 
     # ── Accessibility check ────────────────────────────────────────────────────
 
